@@ -78,5 +78,6 @@ class Program
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
+            .With(new Avalonia.Media.FontManagerOptions { FontFallbacks = Services.SystemFontFallbacks.Query() })
             .LogToTrace();
 }
