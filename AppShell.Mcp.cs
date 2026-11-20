@@ -25,7 +25,7 @@ internal partial class AppShell
             IsReadOnly = true,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            FontFamily = new FontFamily(_settings.FontFamily),
+            FontFamily = new FontFamily(TerminalFontFamily),
             FontSize = 12,
             Height = 130,
             IsVisible = false,

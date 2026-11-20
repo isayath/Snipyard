@@ -1373,21 +1373,6 @@ public partial class TerminalControl : Control, IDisposable
         _panelLineHeight = RowHeight(panelAscent, panelDescent, 1.0);
     }
 
-    /// <summary>
-    /// The font installed under <paramref name="name"/>. FontManager does not fail for a family
-    /// that is not installed: it hands back a stand-in (Helvetica on macOS), whose metrics have
-    /// nothing to do with the font the text layout then falls through to. The resolved family
-    /// has to carry the requested name; "Hiragino Sans" comes back as "Hiragino Sans W3".
-    /// </summary>
-    private static bool TryGetInstalledGlyphTypeface(string name, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out GlyphTypeface? glyphTypeface)
-    {
-        if (FontManager.Current.TryGetGlyphTypeface(new Typeface(name), out glyphTypeface)
-            && glyphTypeface.FamilyName.StartsWith(name, StringComparison.OrdinalIgnoreCase))
-            return true;
-        glyphTypeface = null;
-        return false;
-    }
-
     // Whole pixels, so every row starts on one and runs of rows do not drift into blur
     private double RowHeight(double ascent, double descent) => RowHeight(ascent, descent, _lineSpacing);
 
@@ -1417,7 +1402,7 @@ public partial class TerminalControl : Control, IDisposable
         foreach (var name in _typeface.FontFamily.FamilyNames)
         {
             if (name == CjkFallbackFamily) continue;
-            if (TryGetInstalledGlyphTypeface(name, out var primary))
+            if (Services.MonospaceFonts.TryGetInstalled(name, out var primary))
             {
                 Take(primary);
                 // A Japanese font picked as the primary (BIZ UDGothic, MS Gothic) draws kana and
@@ -1426,7 +1411,7 @@ public partial class TerminalControl : Control, IDisposable
                 break;
             }
         }
-        if (!primaryHasJapanese && TryGetInstalledGlyphTypeface(CjkFallbackFamily, out var cjk))
+        if (!primaryHasJapanese && Services.MonospaceFonts.TryGetInstalled(CjkFallbackFamily, out var cjk))
             Take(cjk);
 
         if (ascent + descent <= 0)

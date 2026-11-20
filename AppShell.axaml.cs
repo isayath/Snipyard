@@ -224,18 +224,6 @@ internal partial class AppShell : UserControl, IDockOwner
     private int _snippetDragIndex;
     private Point _snippetDragStartPos;
 
-    // Font list for settings panel
-    private static readonly List<string> FontList = new()
-    {
-        "Cascadia Mono", "Cascadia Code", "Consolas", "Courier New",
-        "Source Code Pro", "JetBrains Mono", "Fira Code", "Hack",
-        "DejaVu Sans Mono", "Lucida Console",
-        "Segoe UI", "Arial", "Verdana", "Tahoma", "Calibri",
-        "MS Gothic", "BIZ UDGothic", "Yu Gothic", "Yu Gothic UI",
-        "Meiryo", "Meiryo UI", "BIZ UDMincho", "MS Mincho",
-        "Menlo", "SF Mono", "Monaco", "Hiragino Sans",
-    };
-
     private static readonly List<string> LanguageList = new() { "English", "日本語" };
 
     private record MdiChildInfo(
@@ -696,6 +684,7 @@ internal partial class AppShell : UserControl, IDockOwner
         ToolTip.SetTip(BtnWorkspaces, Loc.Get("Workspaces"));
         ToolTip.SetTip(BtnHelp, Loc.Get("HelpTooltip"));
         if (_settingsInitialized) FillPlanTierCombo();
+        if (_settingsInitialized) ShowFontSetting();
 
         // Window title, the labels that embed the AI name, plus feature gating
         ApplyProviderUi();
@@ -1194,7 +1183,7 @@ internal partial class AppShell : UserControl, IDockOwner
 
     private async void OnActivityDiagram(object? sender, RoutedEventArgs e)
     {
-        var typeface = new Avalonia.Media.Typeface(_settings.FontFamily + ", Consolas, Menlo, Courier New");
+        var typeface = new Avalonia.Media.Typeface(TerminalFontFamily + ", Consolas, Menlo, Courier New");
 
         // Check if current terminal has any diagrams (detected or cached)
         var diagrams = new List<Terminal.CodeBlockInfo>();
@@ -2794,7 +2783,7 @@ internal partial class AppShell : UserControl, IDockOwner
         // the panel behind it are not left showing the branch as it was.
         var panel = new Controls.CommitGraphPanel(
             repoRoot, repoLabel, _isDark,
-            new Typeface(_settings.FontFamily + ", Consolas, Menlo, Courier New"),
+            new Typeface(TerminalFontFamily + ", Consolas, Menlo, Courier New"),
             SendToActiveTerminal, ShowMessageDialog, ShowConfirmDialog,
             (title, watermark, initial) => ShowTextInputDialog(title, watermark, initial));
         panel.GitChanged += (_, _) => RefreshGitInfo();
@@ -3409,6 +3398,31 @@ internal partial class AppShell : UserControl, IDockOwner
 
     // ── Settings Panel (inline) ──
 
+    /// <summary>
+    /// The font the terminal and the code panels are drawn in: the one the settings name when
+    /// it is an installed monospace font, otherwise the stand-in MonospaceFonts picks.
+    /// </summary>
+    private string TerminalFontFamily => MonospaceFonts.Resolve(_settings.FontFamily);
+
+    // The entry the font list showed when it was last filled. Apply only writes the font
+    // setting when the selection has moved off it.
+    private MonospaceFonts.Choice? _fontShown;
+
+    /// <summary>
+    /// Fills the font list with the installed monospace fonts and selects the one the terminal
+    /// is drawn in. A setting naming a font missing here (synced from another machine, or a
+    /// proportional font an older build offered) shows its stand-in, but Apply leaves the
+    /// setting alone unless another font is picked, so the machine it came from keeps it.
+    /// Refilled on a language change, which the "Japanese" mark in each entry follows.
+    /// </summary>
+    private void ShowFontSetting()
+    {
+        CmbSettingsFontFamily.ItemsSource = null;
+        CmbSettingsFontFamily.ItemsSource = MonospaceFonts.Installed;
+        _fontShown = MonospaceFonts.Find(TerminalFontFamily);
+        CmbSettingsFontFamily.SelectedItem = _fontShown;
+    }
+
     private void InitializeSettingsPanel()
     {
         _settingsInitialized = true;
@@ -3418,24 +3432,7 @@ internal partial class AppShell : UserControl, IDockOwner
             ? _settings.Language
             : LanguageList[0];
 
-        var availableFonts = new List<string>();
-        foreach (var name in FontList)
-        {
-            try
-            {
-                var tf = new Typeface(name);
-                if (tf.GlyphTypeface != null)
-                    availableFonts.Add(name);
-            }
-            catch { }
-        }
-        if (availableFonts.Count == 0)
-            availableFonts.AddRange(FontList);
-
-        CmbSettingsFontFamily.ItemsSource = availableFonts;
-        CmbSettingsFontFamily.SelectedItem = availableFonts.Contains(_settings.FontFamily)
-            ? _settings.FontFamily
-            : availableFonts[0];
+        ShowFontSetting();
 
         NumSettingsFontSize.Value = (decimal)_settings.FontSize;
         NumSettingsLineSpacing.Value = (decimal)_settings.LineSpacing;
@@ -3705,7 +3702,9 @@ internal partial class AppShell : UserControl, IDockOwner
     private void OnApplySettings(object? sender, RoutedEventArgs e)
     {
         var language = CmbSettingsLanguage.SelectedItem as string ?? "English";
-        var fontFamily = CmbSettingsFontFamily.SelectedItem as string ?? "Cascadia Mono";
+        var fontFamily = CmbSettingsFontFamily.SelectedItem is MonospaceFonts.Choice picked && picked != _fontShown
+            ? picked.Name
+            : _settings.FontFamily;
         var fontSize = (double)(NumSettingsFontSize.Value ?? 14);
         var lineSpacing = (double)(NumSettingsLineSpacing.Value ?? 1.2m);
         _settings.Language = language;
@@ -3739,7 +3738,7 @@ internal partial class AppShell : UserControl, IDockOwner
 
         foreach (var child in _children)
         {
-            child.Terminal.SetFont(_settings.FontFamily, _settings.FontSize, _settings.LineSpacing);
+            child.Terminal.SetFont(TerminalFontFamily, _settings.FontSize, _settings.LineSpacing);
         }
 
         Broadcast(s => s.AdoptSharedLanguage());
@@ -4253,7 +4252,7 @@ internal partial class AppShell : UserControl, IDockOwner
         // that the user typed themselves, so it comes across to the new one.
         var draft = _sourceControl?.DraftMessage ?? "";
 
-        var typeface = new Typeface(_settings.FontFamily + ", Consolas, Menlo, Courier New");
+        var typeface = new Typeface(TerminalFontFamily + ", Consolas, Menlo, Courier New");
         var host = new Controls.SourceControlHost(
             SendToActiveTerminal,
             ShowMessageDialog,
@@ -4283,7 +4282,7 @@ internal partial class AppShell : UserControl, IDockOwner
     /// </summary>
     private void CreateMemoryPanel()
     {
-        var typeface = new Typeface(_settings.FontFamily + ", Consolas, Menlo, Courier New");
+        var typeface = new Typeface(TerminalFontFamily + ", Consolas, Menlo, Courier New");
         var host = new Controls.MemoryHost(
             OpenFileEditorWindow,
             RevealInExplorer,
@@ -8436,7 +8435,7 @@ internal partial class AppShell : UserControl, IDockOwner
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             Height = 380,
-            FontFamily = new FontFamily(_settings.FontFamily),
+            FontFamily = new FontFamily(TerminalFontFamily),
             FontSize = 12,
             VerticalContentAlignment = VerticalAlignment.Top,
         };
@@ -8986,7 +8985,7 @@ internal partial class AppShell : UserControl, IDockOwner
         // Shown as applied, or the next Apply here would write this panel's stale value back
         NumSettingsLineSpacing.Value = (decimal)_settings.LineSpacing;
         foreach (var child in _children)
-            child.Terminal.SetFont(_settings.FontFamily, _settings.FontSize, _settings.LineSpacing);
+            child.Terminal.SetFont(TerminalFontFamily, _settings.FontSize, _settings.LineSpacing);
     }
 
     /// <summary>
@@ -9335,7 +9334,7 @@ internal partial class AppShell : UserControl, IDockOwner
             .Concat(SlashCommandCatalog.ForProject(_cli.ActiveId, folder))
             .Concat(SlashCommandCatalog.ForUserAndSkills(_cli.ActiveId, folder))
             .ToList();
-        terminal.SetFont(_settings.FontFamily, _settings.FontSize, _settings.LineSpacing);
+        terminal.SetFont(TerminalFontFamily, _settings.FontSize, _settings.LineSpacing);
 
         // --- Title bar ---
         var dot = new Ellipse

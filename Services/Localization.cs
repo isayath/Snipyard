@@ -141,6 +141,7 @@ public static class Loc
         ["FontFamily"] = new() { ["English"] = "Font Family", ["日本語"] = "フォント" },
         ["FontSize"] = new() { ["English"] = "Font Size", ["日本語"] = "フォントサイズ" },
         ["LineSpacing"] = new() { ["English"] = "Line Spacing", ["日本語"] = "行間" },
+        ["FontJapaneseCapable"] = new() { ["English"] = "Japanese", ["日本語"] = "日本語対応" },
         ["InitialPrompt"] = new() { ["English"] = "Initial Prompt", ["日本語"] = "初期プロンプト" },
         ["LanguageSetting"] = new() { ["English"] = "Language", ["日本語"] = "言語" },
         ["TerminalShell"] = new() { ["English"] = "Host Shell", ["日本語"] = "ホストシェル" },
