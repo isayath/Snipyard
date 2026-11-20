@@ -244,7 +244,11 @@ public partial class TerminalControl
             {
                 int cp = CodePointAt(s, i, out int n);
                 bool wide = TerminalBuffer.IsWideChar(cp);
-                if (cp > ' ')
+                if (IsBoxDrawing(cp))
+                {
+                    DrawBoxDrawing(context, cp, col * _cellWidth, y, _cellWidth, _cellHeight, brush);
+                }
+                else if (cp > ' ')
                 {
                     var ft = new FormattedText(s.Substring(i, n), CultureInfo.CurrentCulture,
                         FlowDirection.LeftToRight, _typeface, _fontSize, brush);

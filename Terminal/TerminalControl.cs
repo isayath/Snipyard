@@ -6534,6 +6534,10 @@ public partial class TerminalControl : Control, IDisposable
                         var fgBrush = new SolidColorBrush(fg);
                         DrawBlockElement(context, (char)cell.Character, x, y, cellW, _cellHeight, fg, fgBrush);
                     }
+                    else if (IsBoxDrawing(cell.Character))
+                    {
+                        DrawBoxDrawing(context, cell.Character, x, y, cellW, _cellHeight, new SolidColorBrush(fg));
+                    }
                     else
                     {
                         var ft = new FormattedText(cell.Text, CultureInfo.CurrentCulture,
