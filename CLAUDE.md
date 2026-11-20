@@ -58,7 +58,7 @@ dotnet publish -c Release -r win-x64 --self-contained true \
 git add build.number && git commit -m "Bump build number to X.Y.Z"
 git push
 gh release create vX.Y.Z ./publish-single/Snipyard.exe --draft \
-    --target master --title vX.Y.Z --notes "..."   # draft: not "latest" yet
+    --target main --title vX.Y.Z --notes "..."   # draft: not "latest" yet
 
 # --- Mac ---
 git pull
