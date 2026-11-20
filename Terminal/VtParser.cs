@@ -29,7 +29,8 @@ public class VtParser
         Osc,
         OscEsc,
         Dcs,
-        DcsEsc
+        DcsEsc,
+        Charset
     }
 
     public VtParser(TerminalBuffer buffer)
@@ -123,6 +124,11 @@ public class VtParser
             case ParserState.DcsEsc:
                 _state = ParserState.Normal;
                 break;
+            case ParserState.Charset:
+                // The charset the designation names. Every charset is drawn as plain text
+                // here, so which one it is does not matter, only that it is not printed.
+                _state = ParserState.Normal;
+                break;
         }
     }
 
@@ -201,7 +207,10 @@ public class VtParser
                 _state = ParserState.Normal;
                 break;
             case '(': case ')': case '*': case '+': // Character set designation - consume next byte
-                _state = ParserState.Normal; // simplified: skip
+                // The byte after it names the charset. Dropped along with the ESC, it was
+                // printed instead: "ESC ( B", the reset that terminfo's sgr0 sends, left a
+                // stray "B" at the cursor - in the CLI's prompt line, where it sits.
+                _state = ParserState.Charset;
                 break;
             case '=': case '>': // Keypad modes
                 _state = ParserState.Normal;
