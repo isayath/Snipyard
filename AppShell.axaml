@@ -571,6 +571,14 @@
                                                            HorizontalAlignment="Stretch" />
                                         </StackPanel>
                                         <StackPanel Spacing="6">
+                                            <TextBlock x:Name="LblLineSpacing" Text="Line Spacing" FontSize="13"
+                                                       Foreground="{DynamicResource SubtleText}" />
+                                            <NumericUpDown x:Name="NumSettingsLineSpacing"
+                                                           Minimum="1" Maximum="2" Increment="0.05"
+                                                           FormatString="0.00"
+                                                           HorizontalAlignment="Stretch" />
+                                        </StackPanel>
+                                        <StackPanel Spacing="6">
                                             <TextBlock x:Name="LblTerminalShell" Text="Host Shell" FontSize="13"
                                                        Foreground="{DynamicResource SubtleText}" />
                                             <ComboBox x:Name="CmbTerminalShell" Classes="modern"

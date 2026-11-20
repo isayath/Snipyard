@@ -248,7 +248,8 @@ public partial class TerminalControl
                 {
                     var ft = new FormattedText(s.Substring(i, n), CultureInfo.CurrentCulture,
                         FlowDirection.LeftToRight, _typeface, _fontSize, brush);
-                    DrawGlyph(context, ft, col * _cellWidth, y, (wide ? 2 : 1) * _cellWidth);
+                    double w = (wide ? 2 : 1) * _cellWidth;
+                    DrawGlyph(context, ft, col * _cellWidth, y, y + _cellBaseline, w, w);
                 }
                 col += wide ? 2 : 1;
                 i += n;

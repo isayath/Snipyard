@@ -12,6 +12,12 @@ public class AppSettings
     public double FontSize { get; set; } = 14;
 
     /// <summary>
+    /// Terminal row height as a multiple of the font's ascent plus descent (the taller of the
+    /// chosen font and the Japanese fallback). 1.0 packs the rows with no space between them.
+    /// </summary>
+    public double LineSpacing { get; set; } = 1.2;
+
+    /// <summary>
     /// Text size in the file editor windows, set by Ctrl+wheel. Separate from the terminal's
     /// FontSize: the terminal is sized to a readable session, an editor to a readable diff.
     /// </summary>

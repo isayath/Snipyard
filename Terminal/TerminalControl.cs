@@ -27,6 +27,12 @@ public partial class TerminalControl : Control, IDisposable
     private double _cellHeight;
     private Typeface _typeface;
     private double _fontSize = 14;
+    // The family as the user picked it. _typeface carries the fallbacks appended to it, so
+    // passing its name back into SetFont would append them a second time.
+    private string _fontFamilyName = "Cascadia Mono";
+    private double _lineSpacing = 1.2;
+    // Distance from a row's top to the baseline every glyph in that row is drawn on
+    private double _cellBaseline;
     private bool _disposed;
     private string? _workingDirectory;
     private DateTime _startedUtc = DateTime.MinValue;
@@ -89,7 +95,9 @@ public partial class TerminalControl : Control, IDisposable
     private readonly Button _stopButton;
     private Button _expandedStopButton = null!;
 
-    private const double InputBoxHeight = 28;
+    // Tall enough for one terminal row (same height and spacing as the grid) inside the box's
+    // padding and top border; never below the 28 it had when it was fixed
+    private double InputBoxHeight => Math.Max(28, _cellHeight + 9);
     private const double InputBoxMargin = 2;
     private const double ExpandButtonWidth = 32;
 
@@ -302,6 +310,8 @@ public partial class TerminalControl : Control, IDisposable
             _inputTextBox.Padding = new Thickness(6, 4);
             _inputTextBox.FontFamily = _typeface.FontFamily;
             _inputTextBox.FontSize = _fontSize;
+            // A row of the grid: what is typed here goes out to it
+            _inputTextBox.LineHeight = _cellHeight > 0 ? _cellHeight : double.NaN;
             _inputTextBox.PlaceholderText = "IME input here — auto-sent on commit";
             _inputTextBox.TextWrapping = TextWrapping.NoWrap;
             _inputTextBox.AcceptsReturn = false;
@@ -331,6 +341,7 @@ public partial class TerminalControl : Control, IDisposable
         _inputTextBox.Padding = new Thickness(2, 4);
         _inputTextBox.FontFamily = Controls.ChatTheme.BodyFont;
         _inputTextBox.FontSize = Controls.ChatTheme.BodySize(_fontSize);
+        _inputTextBox.ClearValue(TextBox.LineHeightProperty);
         ApplyChatPlaceholder();
         _inputTextBox.TextWrapping = TextWrapping.Wrap;
         _inputTextBox.AcceptsReturn = true;
@@ -515,20 +526,37 @@ public partial class TerminalControl : Control, IDisposable
         ? SideTerminalRect.Height
         : Math.Max(0, Bounds.Height - InputAreaHeight - ExpandedPanelHeight);
 
-    public void SetFont(string fontFamily, double fontSize)
+    public void SetFont(string fontFamily, double fontSize) => SetFont(fontFamily, fontSize, _lineSpacing);
+
+    public void SetFont(string fontFamily, double fontSize, double lineSpacing)
     {
-        _typeface = new Typeface(fontFamily + ", Consolas, Menlo, Courier New");
+        _fontFamilyName = fontFamily;
+        _typeface = new Typeface(ComposeFontFamily(fontFamily));
         _fontSize = fontSize;
+        _lineSpacing = Math.Clamp(lineSpacing, 1.0, 2.0);
+        // Before the input chrome: it takes its line height from the cell
+        MeasureCellSize();
         ApplyInputChrome();
         _docViewPanel?.SetFont(fontFamily, fontSize);
-        MeasureCellSize();
+        if (_panelText != null) _panelText.LineHeight = _panelLineHeight;
         RecalcTerminalSize();
+        InvalidateMeasure();
         InvalidateVisual();
     }
 
+    /// <summary>
+    /// Japanese font the terminal falls back to. Named outright rather than left to the
+    /// system's fallback, which picks whichever CJK font it likes - one with metrics nothing
+    /// was measured against, and on Windows often a Chinese face for kanji.
+    /// </summary>
+    private static string CjkFallbackFamily => OperatingSystem.IsWindows() ? "Yu Gothic UI" : "Hiragino Sans";
+
+    private static string ComposeFontFamily(string fontFamily) =>
+        $"{fontFamily}, Consolas, Menlo, Courier New, {CjkFallbackFamily}";
+
     public TerminalControl()
     {
-        _typeface = new Typeface("Cascadia Mono, Consolas, Menlo, Courier New, monospace");
+        _typeface = new Typeface(ComposeFontFamily(_fontFamilyName));
         _buffer = new TerminalBuffer(24, 80);
         _parser = new VtParser(_buffer);
         _parser.TitleChanged += title =>
@@ -554,7 +582,7 @@ public partial class TerminalControl : Control, IDisposable
             BorderThickness = new Thickness(0, 1, 0, 0),
             Padding = new Thickness(6, 4),
             FontSize = _fontSize,
-            FontFamily = new FontFamily("Cascadia Mono, Consolas, Menlo, Courier New, monospace"),
+            FontFamily = _typeface.FontFamily,
             PlaceholderText = "IME input here — auto-sent on commit",
             Focusable = true,
             AcceptsReturn = false,
@@ -933,7 +961,7 @@ public partial class TerminalControl : Control, IDisposable
         // Ctrl+0 (Cmd+0 on macOS): reset font size to default
         if (e.Key == Key.D0 && Services.Shortcut.HasPrimary(e.KeyModifiers))
         {
-            SetFont(_typeface.FontFamily.Name, 14);
+            SetFont(_fontFamilyName, 14);
             FontSizeChanged?.Invoke(14);
             e.Handled = true;
             return;
@@ -1334,7 +1362,82 @@ public partial class TerminalControl : Control, IDisposable
         var ft = new FormattedText("M", CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
             _typeface, _fontSize, Brushes.White);
         _cellWidth = ft.Width;
-        _cellHeight = ft.Height;
+        // Not the height of "M": that is the primary font's line alone, and a kanji drawn from
+        // the fallback font sits on its own, different baseline inside it
+        var (ascent, descent) = MeasureVerticalExtent(_fontSize);
+        _cellHeight = RowHeight(ascent, descent);
+        // The leading is split evenly above and below the text
+        _cellBaseline = Math.Round((_cellHeight - ascent - descent) / 2 + ascent);
+
+        var (panelAscent, panelDescent) = MeasureVerticalExtent(PanelFontSize);
+        _panelLineHeight = RowHeight(panelAscent, panelDescent, 1.0);
+    }
+
+    /// <summary>
+    /// The font installed under <paramref name="name"/>. FontManager does not fail for a family
+    /// that is not installed: it hands back a stand-in (Helvetica on macOS), whose metrics have
+    /// nothing to do with the font the text layout then falls through to. The resolved family
+    /// has to carry the requested name; "Hiragino Sans" comes back as "Hiragino Sans W3".
+    /// </summary>
+    private static bool TryGetInstalledGlyphTypeface(string name, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out GlyphTypeface? glyphTypeface)
+    {
+        if (FontManager.Current.TryGetGlyphTypeface(new Typeface(name), out glyphTypeface)
+            && glyphTypeface.FamilyName.StartsWith(name, StringComparison.OrdinalIgnoreCase))
+            return true;
+        glyphTypeface = null;
+        return false;
+    }
+
+    // Whole pixels, so every row starts on one and runs of rows do not drift into blur
+    private double RowHeight(double ascent, double descent) => RowHeight(ascent, descent, _lineSpacing);
+
+    private static double RowHeight(double ascent, double descent, double lineSpacing) =>
+        Math.Ceiling((ascent + descent) * lineSpacing);
+
+    /// <summary>
+    /// The highest ascent and the deepest descent of the terminal's primary font and its CJK
+    /// fallback at <paramref name="fontSize"/>, so a row has room for a glyph from either one.
+    /// </summary>
+    private (double Ascent, double Descent) MeasureVerticalExtent(double fontSize)
+    {
+        double ascent = 0, descent = 0;
+        void Take(GlyphTypeface glyphTypeface)
+        {
+            var m = glyphTypeface.Metrics;
+            if (m.DesignEmHeight <= 0) return;
+            double scale = fontSize / m.DesignEmHeight;
+            // Avalonia gives the ascent as a negative offset (up from the baseline)
+            ascent = Math.Max(ascent, Math.Abs(m.Ascent) * scale);
+            descent = Math.Max(descent, Math.Abs(m.Descent) * scale);
+        }
+
+        // The primary font is the first of the list that is installed. Measuring the whole list
+        // would let a fallback that never draws a character decide the row height.
+        bool primaryHasJapanese = false;
+        foreach (var name in _typeface.FontFamily.FamilyNames)
+        {
+            if (name == CjkFallbackFamily) continue;
+            if (TryGetInstalledGlyphTypeface(name, out var primary))
+            {
+                Take(primary);
+                // A Japanese font picked as the primary (BIZ UDGothic, MS Gothic) draws kana and
+                // kanji itself, and the fallback never comes into play
+                primaryHasJapanese = primary.CharacterToGlyphMap.ContainsGlyph('あ');
+                break;
+            }
+        }
+        if (!primaryHasJapanese && TryGetInstalledGlyphTypeface(CjkFallbackFamily, out var cjk))
+            Take(cjk);
+
+        if (ascent + descent <= 0)
+        {
+            // No metrics to be had: the text layout's own line for the font is the best left
+            var ft = new FormattedText("M", CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                _typeface, fontSize, Brushes.White);
+            ascent = ft.Baseline;
+            descent = ft.Height - ft.Baseline;
+        }
+        return (ascent, descent);
     }
 
     private void RecalcTerminalSize()
@@ -4143,7 +4246,7 @@ public partial class TerminalControl : Control, IDisposable
             if (_docViewPanel == null)
             {
                 _docViewPanel = new Controls.DocumentViewPanel(_isDark, _typeface);
-                _docViewPanel.SetFont(_typeface.FontFamily.Name, _fontSize);
+                _docViewPanel.SetFont(_fontFamilyName, _fontSize);
                 _docViewPanel.AskAnswered += (questions, replies) => AnswerAskUserQuestion(questions, replies);
                 _docViewPanel.AskCancelled += () => _pty?.WriteInput("\x1b");
                 _docViewPanel.IsAskOpen = IsAskSelectorOnScreen;
@@ -5170,9 +5273,8 @@ public partial class TerminalControl : Control, IDisposable
             _panelText = new SelectableTextBlock
             {
                 FontFamily = _typeface.FontFamily,
-                FontSize = 12,
-                // Fixed, so box-drawing glyphs from a fallback font do not spread the rows apart
-                LineHeight = PanelLineHeight,
+                FontSize = PanelFontSize,
+                LineHeight = _panelLineHeight,
                 Foreground = primary,
                 TextWrapping = TextWrapping.NoWrap,
             };
@@ -5407,7 +5509,12 @@ public partial class TerminalControl : Control, IDisposable
 
     // ── Panel card ──
 
-    private const double PanelLineHeight = 17;
+    // The panel is set at 12 rather than the terminal's size. Its row height is measured the
+    // way the grid's is, but with no line spacing: the panel is text in a TextBlock, so its
+    // box-drawing glyphs come from the font and only meet between rows packed this tight.
+    private const double PanelFontSize = 12;
+    // Measured with the cell (MeasureCellSize), since it changes only with the font
+    private double _panelLineHeight = 17;
     private SelectableTextBlock? _panelText;
     private ScrollViewer? _panelScroll;
     private string? _panelTitle;
@@ -5446,7 +5553,7 @@ public partial class TerminalControl : Control, IDisposable
             if (card != null && room > 0)
             {
                 double chrome = card.Bounds.Height - scroll.Bounds.Height;
-                double h = Math.Max(4 * PanelLineHeight, room - chrome);
+                double h = Math.Max(4 * _panelLineHeight, room - chrome);
                 if (Math.Abs(h - scroll.MaxHeight) > 1)
                 {
                     scroll.MaxHeight = h;
@@ -5454,9 +5561,9 @@ public partial class TerminalControl : Control, IDisposable
                 }
             }
             if (caretLine < 0) return;
-            double top = caretLine * PanelLineHeight, view = Math.Min(scroll.Viewport.Height, scroll.MaxHeight);
+            double top = caretLine * _panelLineHeight, view = Math.Min(scroll.Viewport.Height, scroll.MaxHeight);
             if (view <= 0) return;
-            if (top < scroll.Offset.Y || top + PanelLineHeight > scroll.Offset.Y + view)
+            if (top < scroll.Offset.Y || top + _panelLineHeight > scroll.Offset.Y + view)
                 scroll.Offset = new Vector(scroll.Offset.X, Math.Max(0, top - view / 3));
         }, DispatcherPriority.Loaded);
     }
@@ -6171,7 +6278,7 @@ public partial class TerminalControl : Control, IDisposable
         double newSize = Math.Clamp(_fontSize + (e.Delta.Y > 0 ? 1 : -1), 8, 32);
         if (newSize != _fontSize)
         {
-            SetFont(_typeface.FontFamily.Name, newSize);
+            SetFont(_fontFamilyName, newSize);
             FontSizeChanged?.Invoke(newSize);
         }
         e.Handled = true;
@@ -6441,15 +6548,18 @@ public partial class TerminalControl : Control, IDisposable
                             if (next >= 0xFE00 && next <= 0xFE0F) glyphW += _cellWidth;
                         }
 
-                        DrawGlyph(context, ft, x, y, glyphW);
+                        DrawGlyph(context, ft, x, y, y + _cellBaseline, cellW, glyphW);
                     }
                 }
 
                 // Draw underline
                 if (cell.Attributes.HasFlag(CellAttributes.Underline))
                 {
+                    // Under the text rather than at the foot of the row, which the line spacing
+                    // has moved away from it
+                    double underlineY = y + Math.Min(_cellHeight - 1, _cellBaseline + Math.Max(1, Math.Round(_fontSize / 8))) + 0.5;
                     var pen = new Pen(new SolidColorBrush(fg), 1);
-                    context.DrawLine(pen, new Point(x, y + _cellHeight - 1), new Point(x + cellW, y + _cellHeight - 1));
+                    context.DrawLine(pen, new Point(x, underlineY), new Point(x + cellW, underlineY));
                 }
 
                 // Draw the caret last so it sits on top of the glyph. The default
@@ -6793,8 +6903,14 @@ public partial class TerminalControl : Control, IDisposable
     }
 
     /// <summary>
-    /// Draws one cell's glyph, squeezed horizontally when the font draws it wider than the
-    /// columns the terminal gave that character.
+    /// Draws one cell's glyph on the row's shared baseline, centred in the columns the terminal
+    /// gave that character, and squeezed horizontally when the font draws it wider than those.
+    ///
+    /// The baseline is the row's, not the glyph's own font's: a kanji from the CJK fallback and
+    /// a letter from the primary font each carry their font's ascent, so placing them by their
+    /// top edge leaves them sitting at different heights on the same line. Centring matters for
+    /// the same mix: a CJK font's full-width advance rarely equals two of the primary font's
+    /// columns, and left-aligned the leftover piles up on one side and the spacing goes uneven.
     ///
     /// Japanese monospace fonts (BIZ UDGothic, MS Gothic, Meiryo) draw every East Asian
     /// "Ambiguous" character at full width - twice the ASCII advance. That set is large and
@@ -6803,19 +6919,36 @@ public partial class TerminalControl : Control, IDisposable
     /// lays its output out for one, all count those as a single column. Drawn at its natural
     /// width the glyph spills past its cell and collides with the next character.
     /// </summary>
-    private static void DrawGlyph(DrawingContext ctx, FormattedText ft, double x, double y, double maxWidth)
+    private static void DrawGlyph(DrawingContext ctx, FormattedText ft, double x, double rowTop, double baseline,
+        double cellWidth, double maxWidth)
     {
+        double top = baseline - ft.Baseline;
+        // A glyph from a font the row was not measured against (colour emoji) can stand taller
+        // than the row's ascent. Rows paint top to bottom, so anything poking up into the row
+        // above would stay on top of that row's text; it is moved down to the row's top instead.
+        // The test is on the ink, not the layout box: a fallback font's box carries half its
+        // line gap above the ascent (a quarter em for Hiragino Sans), so a kana's box starts
+        // above the row while its ink sits well inside it. Moving by the box dropped every
+        // Japanese character below the baseline the Latin letters around it stand on.
+        if (top < rowTop)
+        {
+            double inkTop = top + ft.Height + ft.OverhangAfter - ft.Extent;
+            if (inkTop < rowTop) top += rowTop - inkTop;
+        }
         // Half a pixel of slack: side bearings can push an otherwise fitting glyph a
         // fraction past the boundary, and scaling those would be visible churn for nothing.
         if (ft.Width <= maxWidth + 0.5 || ft.Width <= 0)
         {
-            ctx.DrawText(ft, new Point(x, y));
+            // Centred in the character's own columns. Room beyond them (the cell of a
+            // variation selector) is there to spill into, not to centre across.
+            double offset = ft.Width <= cellWidth ? (cellWidth - ft.Width) / 2 : 0;
+            ctx.DrawText(ft, new Point(x + offset, top));
             return;
         }
 
-        // Horizontal only. Scaling both axes would break the grid - box-drawing runs would
-        // stop meeting their neighbours and vertical rules would no longer reach the next row.
-        using (ctx.PushTransform(Matrix.CreateScale(maxWidth / ft.Width, 1) * Matrix.CreateTranslation(x, y)))
+        // Horizontal only. Scaling both axes would change the glyph's height and lift it
+        // off the baseline its neighbours share.
+        using (ctx.PushTransform(Matrix.CreateScale(maxWidth / ft.Width, 1) * Matrix.CreateTranslation(x, top)))
             ctx.DrawText(ft, new Point(0, 0));
     }
 

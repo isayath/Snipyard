@@ -606,6 +606,7 @@ internal partial class AppShell : UserControl, IDockOwner
         LblLanguage.Text = Loc.Get("LanguageSetting");
         LblFontFamily.Text = Loc.Get("FontFamily");
         LblFontSize.Text = Loc.Get("FontSize");
+        LblLineSpacing.Text = Loc.Get("LineSpacing");
         LblTerminalShell.Text = Loc.Get("TerminalShell");
         LblInitialPrompt.Text = Loc.Get("InitialPrompt");
         LblApplySettings.Text = Loc.Get("Apply");
@@ -3437,6 +3438,7 @@ internal partial class AppShell : UserControl, IDockOwner
             : availableFonts[0];
 
         NumSettingsFontSize.Value = (decimal)_settings.FontSize;
+        NumSettingsLineSpacing.Value = (decimal)_settings.LineSpacing;
 
         TxtInitialPrompt.Text = _settings.InitialPrompt;
         TxtInitialPrompt.LostFocus += (_, _) =>
@@ -3705,9 +3707,11 @@ internal partial class AppShell : UserControl, IDockOwner
         var language = CmbSettingsLanguage.SelectedItem as string ?? "English";
         var fontFamily = CmbSettingsFontFamily.SelectedItem as string ?? "Cascadia Mono";
         var fontSize = (double)(NumSettingsFontSize.Value ?? 14);
+        var lineSpacing = (double)(NumSettingsLineSpacing.Value ?? 1.2m);
         _settings.Language = language;
         _settings.FontFamily = fontFamily;
         _settings.FontSize = fontSize;
+        _settings.LineSpacing = lineSpacing;
         // Open tabs keep the shell they were launched in; this reaches the next new session.
         // While a pinned CLI is active the combo shows that CLI's shell rather than a choice, so
         // saving it would quietly overwrite the preference the user gets back on the next CLI.
@@ -3735,7 +3739,7 @@ internal partial class AppShell : UserControl, IDockOwner
 
         foreach (var child in _children)
         {
-            child.Terminal.SetFont(_settings.FontFamily, _settings.FontSize);
+            child.Terminal.SetFont(_settings.FontFamily, _settings.FontSize, _settings.LineSpacing);
         }
 
         Broadcast(s => s.AdoptSharedLanguage());
@@ -8979,8 +8983,10 @@ internal partial class AppShell : UserControl, IDockOwner
         ApplyLocalization();
         CreateSourceControlPanel();
         CreateMemoryPanel();
+        // Shown as applied, or the next Apply here would write this panel's stale value back
+        NumSettingsLineSpacing.Value = (decimal)_settings.LineSpacing;
         foreach (var child in _children)
-            child.Terminal.SetFont(_settings.FontFamily, _settings.FontSize);
+            child.Terminal.SetFont(_settings.FontFamily, _settings.FontSize, _settings.LineSpacing);
     }
 
     /// <summary>
@@ -9329,7 +9335,7 @@ internal partial class AppShell : UserControl, IDockOwner
             .Concat(SlashCommandCatalog.ForProject(_cli.ActiveId, folder))
             .Concat(SlashCommandCatalog.ForUserAndSkills(_cli.ActiveId, folder))
             .ToList();
-        terminal.SetFont(_settings.FontFamily, _settings.FontSize);
+        terminal.SetFont(_settings.FontFamily, _settings.FontSize, _settings.LineSpacing);
 
         // --- Title bar ---
         var dot = new Ellipse
